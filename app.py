@@ -187,7 +187,13 @@ def register_event(text, conversation_key, target_id, target_type):
 
         parsed = parse_event_text(text)
         if not parsed:
-            return "イベント形式:\n3/20 18:00 歓送迎会\nまたは\n3/20 18:00-20:00 歓送迎会"
+            return (
+                "イベント形式:\n"
+                "3/20 18:00 歓送迎会\n"
+                "3/20 18:00-20:00 歓送迎会\n"
+                "2026/3/20 18:00 歓送迎会\n"
+                "2026/3/20 18:00-20:00 歓送迎会"
+            )
 
         rows = get_data_rows()
         for row in rows:
