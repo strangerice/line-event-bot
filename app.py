@@ -5,6 +5,7 @@ import json
 import re
 import gspread
 from google.oauth2.service_account import Credentials
+ from datetime import datetime
 
 app = Flask(__name__)
 
@@ -73,7 +74,8 @@ def register_event(text, user):
         time = match.group(3)
         event = match.group(4)
 
-        date = f"2025/{month}/{day}"
+        year = datetime.now().year
+        date = f"{year}/{month}/{day}"
 
         sheet.append_row([event, date, time, user])
 
