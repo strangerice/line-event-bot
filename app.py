@@ -107,5 +107,69 @@ def reply(token, text):
     requests.post(url, headers=headers, json=data)
 
 
+# ==============================
+# LINE自動送信（Push）
+# ==============================
+
+def push(user, text):
+
+    url = "https://api.line.me/v2/bot/message/push"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_TOKEN}"
+    }
+
+    data = {
+        "to": user,
+        "messages": [{"type": "text", "text": text}]
+    }
+
+    requests.post(url, headers=headers, json=data)
+
+
+# ==============================
+# リマインドチェック
+# ==============================
+def check_reminders():
+
+    from datetime import datetime, timedelta
+
+    data = sheet.get_all_values()
+
+    today = datetime.now().date()
+
+    for row in data:
+
+        event = row[0]
+        date = row[1]
+        time = row[2]
+        user = row[3]
+
+        event_date = datetime.strptime(date, "%Y/%m/%d").date()
+
+        days = (event_date - today).days
+
+        if days == 14:
+            push(user, f"【2週間前】{event} {date} {time}")
+
+        elif days == 7:
+            push(user, f"【1週間前】{event} {date} {time}")
+
+        elif days == 0:
+            push(user, f"【今日】{event} {date} {time}")
+
+# ==============================
+# cron用エンドポイント
+# ==============================
+
+@app.route("/cron")
+def cron():
+
+    check_reminders()
+
+    return "ok"
+
+
 if __name__ == "__main__":
     app.run()
