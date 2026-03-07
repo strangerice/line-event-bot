@@ -347,7 +347,7 @@ def filter_events_by_range(target_id, start_date, end_date, title):
 
     return "\n".join(lines)
 
-def build_weekly_summary_for_target(target_id):
+def build_weekly_summary_for_target(conversation_key):
     start = today_jst()
     end = start + timedelta(days=6)
 
@@ -355,7 +355,8 @@ def build_weekly_summary_for_target(target_id):
     result = []
 
     for row in rows:
-        if row[3] != target_id:
+        row = normalize_row(row)
+        if row[3] != conversation_key:
             continue
 
         try:
@@ -378,7 +379,10 @@ def build_weekly_summary_for_target(target_id):
 
     lines = ["【今週の予定】"]
     for row in result:
-        lines.append(f"- {row[0]} {row[1]} {row[2]}")
+        if row[2]:
+            lines.append(f"- {row[0]} {row[1]} {row[2]}")
+        else:
+            lines.append(f"- {row[0]} {row[1]}")
 
     return "\n".join(lines)
 
@@ -401,7 +405,7 @@ def check_daily_reminders():
     for sheet_row_no, row in enumerate(all_values[1:], start=2):
         row = normalize_row(row)
 
-        title, date_str, time_str, target_id, target_type, sent_14, sent_7, sent_0, sent_weekly = row
+        title, date_str, time_str, conversation_key, target_id, target_type, sent_14, sent_7, sent_0, sent_weekly = row
 
         try:
             event_date = datetime.strptime(date_str, "%Y/%m/%d").date()
@@ -411,21 +415,17 @@ def check_daily_reminders():
         days = (event_date - today).days
         display_datetime = f"{date_str} {time_str}" if time_str else date_str
 
-        message_14 = f"【2週間前リマインド】\n予定: {title}\n日時: {display_datetime}"
-        message_7 = f"【1週間前リマインド】\n予定: {title}\n日時: {display_datetime}"
-        message_0 = f"【本日9時リマインド】\n予定: {title}\n日時: {display_datetime}"
-
         if days == 14 and sent_14 != "1":
-            push(target_id, message_14)
-            update_sent_flag(sheet_row_no, 6)
-
-        elif days == 7 and sent_7 != "1":
-            push(target_id, message_7)
+            push(target_id, f"【2週間前リマインド】\n{title}\n{display_datetime}")
             update_sent_flag(sheet_row_no, 7)
 
-        elif days == 0 and sent_0 != "1":
-            push(target_id, message_0)
+        elif days == 7 and sent_7 != "1":
+            push(target_id, f"【1週間前リマインド】\n{title}\n{display_datetime}")
             update_sent_flag(sheet_row_no, 8)
+
+        elif days == 0 and sent_0 != "1":
+            push(target_id, f"【本日9時リマインド】\n{title}\n{display_datetime}")
+            update_sent_flag(sheet_row_no, 9)
 
 def check_weekly_schedule():
     today = today_jst()
@@ -438,31 +438,37 @@ def check_weekly_schedule():
     week_key = get_week_key(today)
     rows = get_data_rows()
 
-    targets = {}
+    conversations = {}
     for idx, row in enumerate(rows, start=2):
         row = normalize_row(row)
-        target_id = row[3]
-        if not target_id:
-            continue
-        targets.setdefault(target_id, []).append((idx, row))
 
-    for target_id, row_items in targets.items():
-        # そのターゲットですでに今週送っていれば送らない
+        conversation_key = row[3]
+        target_id = row[4]
+
+        if not conversation_key or not target_id:
+            continue
+
+        conversations.setdefault(conversation_key, []).append((idx, row))
+
+    for conversation_key, row_items in conversations.items():
+        # その会話ですでに今週送っていれば送らない
         already_sent = False
+        target_id = row_items[0][1][4]
+
         for _, row in row_items:
-            if row[8] == week_key:
+            if row[9] == week_key:
                 already_sent = True
                 break
 
         if already_sent:
             continue
 
-        message = build_weekly_summary_for_target(target_id)
+        message = build_weekly_summary_for_target(conversation_key)
         push(target_id, message)
 
-        # そのターゲットの全行に今週キーを記録
+        # その会話の全行に今週キーを記録
         for sheet_row_no, _ in row_items:
-            update_sent_flag(sheet_row_no, 9, week_key)
+            update_sent_flag(sheet_row_no, 10, week_key)
 
 def check_reminders():
     check_daily_reminders()
