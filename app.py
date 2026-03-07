@@ -26,10 +26,13 @@ credentials = Credentials.from_service_account_info(
     credentials_info,
     scopes=scopes
 )
+
 gc = gspread.authorize(credentials)
 sheet = gc.open(SHEET_NAME).sheet1
 
-# 列定義
+# ==============================
+# シートヘッダー
+# ==============================
 HEADER = [
     "title",        # A
     "date",         # B 例: 2026/3/20
@@ -41,7 +44,6 @@ HEADER = [
     "sent_0"        # H 0/1
 ]
 
-
 # ==============================
 # 初期化
 # ==============================
@@ -52,16 +54,16 @@ def ensure_header():
     elif values[0] != HEADER:
         sheet.insert_row(HEADER, 1)
 
-
 ensure_header()
-
 
 # ==============================
 # 共通
 # ==============================
-def today_jst():
+def now_jst():
     return datetime.utcnow() + timedelta(hours=9)
 
+def today_jst():
+    return now_jst().date()
 
 def get_target_info(event_source):
     source_type = event_source.get("type")
@@ -76,7 +78,6 @@ def get_target_info(event_source):
         return event_source.get("roomId"), "room"
 
     return None, None
-
 
 def parse_event_text(text):
     """
@@ -94,88 +95,30 @@ def parse_event_text(text):
     time_str = match.group(3)
     title = match.group(4)
 
-    now = today_jst()
-    year = now.year
-
-    # 今年の日付として作り、過去なら翌年に回す
+    year = now_jst().year
     event_dt = datetime.strptime(f"{year}/{month}/{day} {time_str}", "%Y/%m/%d %H:%M")
-    if event_dt < now - timedelta(days=1):
+
+    # すでにかなり過去なら翌年扱い
+    if event_dt < now_jst() - timedelta(days=1):
         year += 1
 
     date_str = f"{year}/{month}/{day}"
+
     return {
         "title": title,
         "date": date_str,
         "time": time_str
     }
 
-def convert_group_event_notification_to_event_text(text):
-    """
-    LINEグループのイベント通知っぽい文を
-    '3/20 18:00 歓送迎会' の形に変換する
-    変換できなければ None
-    """
+def get_data_rows():
+    values = sheet.get_all_values()
+    if len(values) <= 1:
+        return []
+    return values[1:]
 
-    text = text.strip()
-
-    # 例:
-    # イベント「歓送迎会」が作成されました
-    # 3月20日 18:00
-    #
-    # 例:
-    # イベント：歓送迎会
-    # 3/20 18:00
-    #
-    # 例:
-    # ○○がイベントを作成しました
-    # 3/20 18:00
-    # タイトルが取れない場合は "LINEイベント"
-
-    # まず「イベント」らしい文か軽く判定
-    if "イベント" not in text:
-        return None
-
-    # タイトル抽出
-    title = None
-
-    patterns_title = [
-        r'イベント[「"](.+?)[」"]',
-        r'イベント[:：]\s*(.+)',
-    ]
-
-    for p in patterns_title:
-        m = re.search(p, text)
-        if m:
-            title = m.group(1).strip()
-            # 改行以降を切る
-            title = title.splitlines()[0].strip()
-            break
-
-    # 日付時刻抽出
-    dt_patterns = [
-        r'(\d{1,2})月(\d{1,2})日\s*(\d{1,2}:\d{2})',
-        r'(\d{1,2})/(\d{1,2})\s*(\d{1,2}:\d{2})'
-    ]
-
-    month = day = time_str = None
-
-    for p in dt_patterns:
-        m = re.search(p, text)
-        if m:
-            month = m.group(1)
-            day = m.group(2)
-            time_str = m.group(3)
-            break
-
-    if not month or not day or not time_str:
-        return None
-
-    if not title:
-        title = "LINEイベント"
-
-    # register_event が読める形式へ変換
-    return f"{month}/{day} {time_str} {title}"
-
+# ==============================
+# LINE送信
+# ==============================
 def reply(token, text):
     url = "https://api.line.me/v2/bot/message/reply"
     headers = {
@@ -187,7 +130,6 @@ def reply(token, text):
         "messages": [{"type": "text", "text": text}]
     }
     requests.post(url, headers=headers, json=data, timeout=15)
-
 
 def push(to, text):
     url = "https://api.line.me/v2/bot/message/push"
@@ -201,17 +143,6 @@ def push(to, text):
     }
     requests.post(url, headers=headers, json=data, timeout=15)
 
-
-def get_data_rows():
-    """
-    ヘッダーを除いた全データを返す
-    """
-    values = sheet.get_all_values()
-    if len(values) <= 1:
-        return []
-    return values[1:]
-
-
 # ==============================
 # イベント登録
 # ==============================
@@ -220,6 +151,7 @@ def register_event(text, target_id, target_type):
     if not parsed:
         return "イベント形式:\n3/20 18:00 歓送迎会"
 
+    # 重複チェック
     rows = get_data_rows()
     for row in rows:
         if len(row) < 5:
@@ -246,9 +178,8 @@ def register_event(text, target_id, target_type):
 
     return f"イベント登録しました\n{parsed['title']} {parsed['date']} {parsed['time']}"
 
-
 # ==============================
-# 一覧表示
+# 一覧
 # ==============================
 def list_events(target_id):
     rows = get_data_rows()
@@ -257,15 +188,13 @@ def list_events(target_id):
     if not my_rows:
         return "イベントはありません"
 
-    # 日時順に並べる
     my_rows.sort(key=lambda r: datetime.strptime(f"{r[1]} {r[2]}", "%Y/%m/%d %H:%M"))
 
-    message_lines = ["イベント一覧"]
+    lines = ["イベント一覧"]
     for idx, row in enumerate(my_rows, start=1):
-        message_lines.append(f"{idx}. {row[0]} {row[1]} {row[2]}")
+        lines.append(f"{idx}. {row[0]} {row[1]} {row[2]}")
 
-    return "\n".join(message_lines)
-
+    return "\n".join(lines)
 
 # ==============================
 # 削除
@@ -281,7 +210,6 @@ def delete_event(text, target_id):
     if len(all_values) <= 1:
         return "削除できるイベントがありません"
 
-    # シート上の行番号を保持
     indexed_rows = []
     for sheet_row_no, row in enumerate(all_values[1:], start=2):
         if len(row) >= 4 and row[3] == target_id:
@@ -294,7 +222,6 @@ def delete_event(text, target_id):
     sheet.delete_rows(sheet_row_no)
 
     return f"イベント削除しました\n{row[0]} {row[1]} {row[2]}"
-
 
 # ==============================
 # 今日 / 明日 / 今週
@@ -319,28 +246,27 @@ def filter_events_by_range(target_id, start_date, end_date, title):
         return f"{title}の予定はありません"
 
     result.sort(key=lambda r: datetime.strptime(f"{r[1]} {r[2]}", "%Y/%m/%d %H:%M"))
+
     lines = [f"{title}の予定"]
     for row in result:
         lines.append(f"- {row[0]} {row[1]} {row[2]}")
-    return "\n".join(lines)
 
+    return "\n".join(lines)
 
 # ==============================
 # リマインド
 # ==============================
 def update_sent_flag(sheet_row_no, col_index):
-    # col_index: 6(F) / 7(G) / 8(H)
     sheet.update_cell(sheet_row_no, col_index, "1")
-
 
 def check_reminders():
     all_values = sheet.get_all_values()
     if len(all_values) <= 1:
         return "ok"
 
-    today = today_jst().date()
+    now = now_jst()
+    today = now.date()
 
-    # 2行目以降がデータ
     for sheet_row_no, row in enumerate(all_values[1:], start=2):
         if len(row) < 8:
             continue
@@ -363,11 +289,11 @@ def check_reminders():
             update_sent_flag(sheet_row_no, 7)
 
         elif days == 0 and sent_0 != "1":
+            # cron-job.org 側を毎日 9:00 JST にしている前提
             push(target_id, f"【本日9時リマインド】\n{title}\n{date_str} {time_str}")
             update_sent_flag(sheet_row_no, 8)
 
     return "ok"
-
 
 # ==============================
 # ルート
@@ -375,7 +301,6 @@ def check_reminders():
 @app.route("/")
 def home():
     return "bot running"
-
 
 @app.route("/cron")
 def cron():
@@ -385,16 +310,9 @@ def cron():
     except Exception as e:
         return f"error: {str(e)}", 500
 
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     body = request.json
-
-    # ===== ここを追加 =====
-    print("===== WEBHOOK BODY =====")
-    print(json.dumps(body, ensure_ascii=False))
-    print("========================")
-    # =====================
 
     for event in body.get("events", []):
         if event.get("type") != "message":
@@ -409,6 +327,8 @@ def webhook():
         if not target_id:
             continue
 
+        # 個人トークはそのまま登録可能
+        # グループ/ルームは「登録 」で始まるときだけ登録
         if text == "一覧":
             result = list_events(target_id)
 
@@ -416,30 +336,36 @@ def webhook():
             result = delete_event(text, target_id)
 
         elif text == "今日":
-            d = today_jst().date()
+            d = today_jst()
             result = filter_events_by_range(target_id, d, d, "今日")
 
         elif text == "明日":
-            d = today_jst().date() + timedelta(days=1)
+            d = today_jst() + timedelta(days=1)
             result = filter_events_by_range(target_id, d, d, "明日")
 
         elif text == "今週":
-            today = today_jst().date()
-            end = today + timedelta(days=6)
-            result = filter_events_by_range(target_id, today, end, "今週")
+            start = today_jst()
+            end = start + timedelta(days=6)
+            result = filter_events_by_range(target_id, start, end, "今週")
 
         else:
-            converted = convert_group_event_notification_to_event_text(text)
-
-            if converted:
-                result = register_event(converted, target_id, target_type)
+            if target_type in ["group", "room"]:
+                if text.startswith("登録 "):
+                    event_text = text.replace("登録 ", "", 1).strip()
+                    result = register_event(event_text, target_id, target_type)
+                else:
+                    result = (
+                        "グループでは次の形式で登録してください\n"
+                        "登録 3/20 18:00 歓送迎会\n\n"
+                        "使えるコマンド:\n"
+                        "一覧\n削除 1\n今日\n明日\n今週"
+                    )
             else:
                 result = register_event(text, target_id, target_type)
 
         reply(reply_token, result)
 
     return "OK"
-
 
 if __name__ == "__main__":
     app.run()
