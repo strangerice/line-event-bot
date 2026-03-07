@@ -328,7 +328,8 @@ def update_sent_flag(sheet_row_no, col_index, value="1"):
 
 def check_daily_reminders():
     sheet = get_sheet()
-    values = sheet.get_all_values()
+    all_values = sheet.get_all_values()
+    
     if len(all_values) <= 1:
         return
 
