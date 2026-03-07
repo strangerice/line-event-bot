@@ -144,12 +144,16 @@ def check_reminders():
         if len(row) < 4:
             continue
 
-        event = row[0]
-        date = row[1]
-        time = row[2]
-        user = row[3]
+        try:
+            event = row[0]
+            date = row[1]
+            time = row[2]
+            user = row[3]
 
-        event_date = datetime.strptime(date, "%Y/%m/%d").date()
+            event_date = datetime.strptime(date, "%Y/%m/%d").date()
+
+        except:
+            continue
 
         days = (event_date - today).days
 
