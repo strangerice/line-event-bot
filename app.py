@@ -21,14 +21,14 @@ scopes = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-credentials_info = json.loads(GOOGLE_CREDENTIALS)
-credentials = Credentials.from_service_account_info(
-    credentials_info,
-    scopes=scopes
-)
-
-gc = gspread.authorize(credentials)
-sheet = gc.open(SHEET_NAME).sheet1
+def get_sheet():
+    credentials_info = json.loads(GOOGLE_CREDENTIALS)
+    credentials = Credentials.from_service_account_info(
+        credentials_info,
+        scopes=scopes
+    )
+    gc = gspread.authorize(credentials)
+    return gc.open(SHEET_NAME).sheet1
 
 # ==============================
 # シートヘッダー
@@ -49,6 +49,7 @@ HEADER = [
 # 初期化
 # ==============================
 def ensure_header():
+    sheet = get_sheet()
     values = sheet.get_all_values()
     if not values:
         sheet.append_row(HEADER)
@@ -137,6 +138,7 @@ def parse_event_text(text):
     }
 
 def get_data_rows():
+    sheet = get_sheet()
     values = sheet.get_all_values()
     if len(values) <= 1:
         return []
@@ -179,6 +181,7 @@ def push(to, text):
 # イベント登録
 # ==============================
 def register_event(text, target_id, target_type):
+    sheet = get_sheet()
     parsed = parse_event_text(text)
     if not parsed:
         return "イベント形式:\n3/20 18:00 歓送迎会\nまたは\n3/20 18:00-20:00 歓送迎会"
@@ -230,13 +233,15 @@ def list_events(target_id):
 # 削除
 # ==============================
 def delete_event(text, target_id):
+    sheet = get_sheet()
     match = re.match(r"^削除\s+(\d+)$", text.strip())
     if not match:
         return "削除形式:\n削除 1"
 
     delete_no = int(match.group(1))
 
-    all_values = sheet.get_all_values()
+    sheet = get_sheet()
+    values = sheet.get_all_values()
     if len(all_values) <= 1:
         return "削除できるイベントがありません"
 
@@ -318,10 +323,12 @@ def build_weekly_summary_for_target(target_id):
 # リマインド
 # ==============================
 def update_sent_flag(sheet_row_no, col_index, value="1"):
+    sheet = get_sheet()
     sheet.update_cell(sheet_row_no, col_index, value)
 
 def check_daily_reminders():
-    all_values = sheet.get_all_values()
+    sheet = get_sheet()
+    values = sheet.get_all_values()
     if len(all_values) <= 1:
         return
 
