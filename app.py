@@ -84,15 +84,18 @@ def get_target_info(event_source):
     source_type = event_source.get("type")
 
     if source_type == "user":
-        return event_source.get("userId"), "user"
+        target_id = event_source.get("userId")
+        return target_id, "user", f"user:{target_id}"
 
     if source_type == "group":
-        return event_source.get("groupId"), "group"
+        target_id = event_source.get("groupId")
+        return target_id, "group", f"group:{target_id}"
 
     if source_type == "room":
-        return event_source.get("roomId"), "room"
+        target_id = event_source.get("roomId")
+        return target_id, "room", f"room:{target_id}"
 
-    return None, None
+    return None, None, None
 
 def normalize_row(row):
     """
