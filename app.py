@@ -180,36 +180,47 @@ def push(to, text):
 # ==============================
 # イベント登録
 # ==============================
-def register_event(text, target_id, target_type):
-    sheet = get_sheet()
-    parsed = parse_event_text(text)
-    if not parsed:
-        return "イベント形式:\n3/20 18:00 歓送迎会\nまたは\n3/20 18:00-20:00 歓送迎会"
+def register_event(text, conversation_key, target_id, target_type):
+    try:
+        sheet = get_sheet()
 
-    rows = get_data_rows()
-    for row in rows:
-        if (
-            row[0] == parsed["title"]
-            and row[1] == parsed["date"]
-            and row[2] == parsed["time"]
-            and row[3] == target_id
-        ):
-            return f"すでに登録済みです\n{parsed['title']} {parsed['date']} {parsed['time']}"
+        parsed = parse_event_text(text)
+        if not parsed:
+            return "イベント形式:\n3/20 18:00 歓送迎会\nまたは\n3/20 18:00-20:00 歓送迎会"
 
-    row = [
-        parsed["title"],
-        parsed["date"],
-        parsed["time"],
-        target_id,
-        target_type,
-        "0",
-        "0",
-        "0",
-        ""
-    ]
-    sheet.append_row(row)
+        rows = get_data_rows()
+        for row in rows:
+            row = normalize_row(row)
+            if (
+                row[0] == parsed["title"]
+                and row[1] == parsed["date"]
+                and row[2] == parsed["time"]
+                and row[3] == conversation_key
+            ):
+                return f"すでに登録済みです\n{parsed['title']} {parsed['date']} {parsed['time']}"
 
-    return f"イベント登録しました\n{parsed['title']} {parsed['date']} {parsed['time']}"
+        row = [
+            parsed["title"],
+            parsed["date"],
+            parsed["time"],
+            conversation_key,
+            target_id,
+            target_type,
+            "0",
+            "0",
+            "0",
+            ""
+        ]
+
+        print("REGISTER ROW =", row)
+        sheet.append_row(row)
+        print("REGISTER DONE")
+
+        return f"イベント登録しました\n{parsed['title']} {parsed['date']}\n{parsed['time']}"
+
+    except Exception as e:
+        print("REGISTER ERROR =", str(e))
+        return f"登録エラー: {str(e)}"
 
 # ==============================
 # 一覧
