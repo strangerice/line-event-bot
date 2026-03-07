@@ -101,14 +101,24 @@ def normalize_row(row):
 def parse_event_text(text):
     """
     対応例:
+    3/20 歓送迎会
+    3/20　歓送迎会
     3/20 18:00 歓送迎会
     3/20 18:00-20:00 歓送迎会
+    2026/3/20 歓送迎会
     2026/3/20 18:00 歓送迎会
     2026/3/20 18:00-20:00 歓送迎会
     """
 
-    # 年あり / 年なし両対応
-    pattern = r"^\s*(?:(\d{4})/)?(\d{1,2})/(\d{1,2})\s+(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\s+(.+?)\s*$"
+    # 全角空白を半角空白に統一
+    text = text.replace("\u3000", " ").strip()
+
+    # 空白を連続1個に圧縮
+    text = re.sub(r"\s+", " ", text)
+
+    # 年あり / 年なし
+    # 時刻あり / なし
+    pattern = r"^\s*(?:(\d{4})/)?(\d{1,2})/(\d{1,2})(?:\s+(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?))?\s+(.+?)\s*$"
     match = re.match(pattern, text)
 
     if not match:
@@ -117,16 +127,23 @@ def parse_event_text(text):
     year_str = match.group(1)
     month = int(match.group(2))
     day = int(match.group(3))
-    time_str = match.group(4)
+    time_str = match.group(4)  # ない場合は None
     title = match.group(5)
 
-    start_time = time_str.split("-")[0]
-
+    # 年の決定
     if year_str:
         year = int(year_str)
     else:
         year = now_jst().year
-        event_dt = datetime.strptime(f"{year}/{month}/{day} {start_time}", "%Y/%m/%d %H:%M")
+
+        # 時刻がある場合はその開始時刻で判定
+        if time_str:
+            start_time = time_str.split("-")[0]
+            event_dt = datetime.strptime(f"{year}/{month}/{day} {start_time}", "%Y/%m/%d %H:%M")
+        else:
+            event_dt = datetime.strptime(f"{year}/{month}/{day}", "%Y/%m/%d")
+
+        # かなり過去なら翌年扱い
         if event_dt < now_jst() - timedelta(days=1):
             year += 1
 
@@ -135,7 +152,7 @@ def parse_event_text(text):
     return {
         "title": title,
         "date": date_str,
-        "time": time_str
+        "time": time_str if time_str else ""
     }
 
 def get_data_rows():
@@ -189,10 +206,11 @@ def register_event(text, conversation_key, target_id, target_type):
         if not parsed:
             return (
                 "イベント形式:\n"
+                "3/20 歓送迎会\n"
                 "3/20 18:00 歓送迎会\n"
                 "3/20 18:00-20:00 歓送迎会\n"
-                "2026/3/20 18:00 歓送迎会\n"
-                "2026/3/20 18:00-20:00 歓送迎会"
+                "2026/3/20 歓送迎会\n"
+                "2026/3/20 18:00 歓送迎会"
             )
 
         rows = get_data_rows()
@@ -253,7 +271,7 @@ def list_events(conversation_key):
 
     my_rows.sort(
         key=lambda r: datetime.strptime(
-            f"{r[1]} {r[2].split('-')[0]}",
+            f"{r[1]} {(r[2].split('-')[0] if r[2] else '00:00')}",
             "%Y/%m/%d %H:%M"
         )
     )
@@ -316,7 +334,12 @@ def filter_events_by_range(target_id, start_date, end_date, title):
     if not result:
         return f"{title}の予定はありません"
 
-    result.sort(key=lambda r: datetime.strptime(f"{r[1]} {r[2].split('-')[0]}", "%Y/%m/%d %H:%M"))
+    result.sort(
+        key=lambda r: datetime.strptime(
+            f"{r[1]} {(r[2].split('-')[0] if r[2] else '00:00')}",
+            "%Y/%m/%d %H:%M"
+        )
+    )
 
     lines = [f"{title}の予定"]
     for row in result:
@@ -346,7 +369,12 @@ def build_weekly_summary_for_target(target_id):
     if not result:
         return "【今週の予定】\n今週の予定はありません"
 
-    result.sort(key=lambda r: datetime.strptime(f"{r[1]} {r[2].split('-')[0]}", "%Y/%m/%d %H:%M"))
+    result.sort(
+        key=lambda r: datetime.strptime(
+            f"{r[1]} {(r[2].split('-')[0] if r[2] else '00:00')}",
+            "%Y/%m/%d %H:%M"
+        )
+    )
 
     lines = ["【今週の予定】"]
     for row in result:
@@ -364,7 +392,7 @@ def update_sent_flag(sheet_row_no, col_index, value="1"):
 def check_daily_reminders():
     sheet = get_sheet()
     all_values = sheet.get_all_values()
-    
+
     if len(all_values) <= 1:
         return
 
@@ -381,17 +409,22 @@ def check_daily_reminders():
             continue
 
         days = (event_date - today).days
+        display_datetime = f"{date_str} {time_str}" if time_str else date_str
+
+        message_14 = f"【2週間前リマインド】\n予定: {title}\n日時: {display_datetime}"
+        message_7 = f"【1週間前リマインド】\n予定: {title}\n日時: {display_datetime}"
+        message_0 = f"【本日9時リマインド】\n予定: {title}\n日時: {display_datetime}"
 
         if days == 14 and sent_14 != "1":
-            push(target_id, f"【2週間前リマインド】\n{title}\n{date_str} {time_str}")
+            push(target_id, message_14)
             update_sent_flag(sheet_row_no, 6)
 
         elif days == 7 and sent_7 != "1":
-            push(target_id, f"【1週間前リマインド】\n{title}\n{date_str} {time_str}")
+            push(target_id, message_7)
             update_sent_flag(sheet_row_no, 7)
 
         elif days == 0 and sent_0 != "1":
-            push(target_id, f"【本日9時リマインド】\n{title}\n{date_str} {time_str}")
+            push(target_id, message_0)
             update_sent_flag(sheet_row_no, 8)
 
 def check_weekly_schedule():
