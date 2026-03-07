@@ -109,6 +109,72 @@ def parse_event_text(text):
         "time": time_str
     }
 
+def convert_group_event_notification_to_event_text(text):
+    """
+    LINEグループのイベント通知っぽい文を
+    '3/20 18:00 歓送迎会' の形に変換する
+    変換できなければ None
+    """
+
+    text = text.strip()
+
+    # 例:
+    # イベント「歓送迎会」が作成されました
+    # 3月20日 18:00
+    #
+    # 例:
+    # イベント：歓送迎会
+    # 3/20 18:00
+    #
+    # 例:
+    # ○○がイベントを作成しました
+    # 3/20 18:00
+    # タイトルが取れない場合は "LINEイベント"
+
+    # まず「イベント」らしい文か軽く判定
+    if "イベント" not in text:
+        return None
+
+    # タイトル抽出
+    title = None
+
+    patterns_title = [
+        r'イベント[「"](.+?)[」"]',
+        r'イベント[:：]\s*(.+)',
+    ]
+
+    for p in patterns_title:
+        m = re.search(p, text)
+        if m:
+            title = m.group(1).strip()
+            # 改行以降を切る
+            title = title.splitlines()[0].strip()
+            break
+
+    # 日付時刻抽出
+    dt_patterns = [
+        r'(\d{1,2})月(\d{1,2})日\s*(\d{1,2}:\d{2})',
+        r'(\d{1,2})/(\d{1,2})\s*(\d{1,2}:\d{2})'
+    ]
+
+    month = day = time_str = None
+
+    for p in dt_patterns:
+        m = re.search(p, text)
+        if m:
+            month = m.group(1)
+            day = m.group(2)
+            time_str = m.group(3)
+            break
+
+    if not month or not day or not time_str:
+        return None
+
+    if not title:
+        title = "LINEイベント"
+
+    # register_event が読める形式へ変換
+    return f"{month}/{day} {time_str} {title}"
 
 def reply(token, text):
     url = "https://api.line.me/v2/bot/message/reply"
@@ -153,6 +219,18 @@ def register_event(text, target_id, target_type):
     parsed = parse_event_text(text)
     if not parsed:
         return "イベント形式:\n3/20 18:00 歓送迎会"
+
+    rows = get_data_rows()
+    for row in rows:
+        if len(row) < 5:
+            continue
+        if (
+            row[0] == parsed["title"]
+            and row[1] == parsed["date"]
+            and row[2] == parsed["time"]
+            and row[3] == target_id
+        ):
+            return f"すでに登録済みです\n{parsed['title']} {parsed['date']} {parsed['time']}"
 
     row = [
         parsed["title"],
@@ -345,7 +423,12 @@ def webhook():
             result = filter_events_by_range(target_id, today, end, "今週")
 
         else:
-            result = register_event(text, target_id, target_type)
+            converted = convert_group_event_notification_to_event_text(text)
+
+            if converted:
+                result = register_event(converted, target_id, target_type)
+            else:
+                result = register_event(text, target_id, target_type)
 
         reply(reply_token, result)
 
