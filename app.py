@@ -14,7 +14,10 @@ LINE_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 # Google Sheets認証（Render用）
 # ==============================
 
-scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+scopes = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 
 credentials_info = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
