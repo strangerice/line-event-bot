@@ -390,6 +390,12 @@ def cron():
 def webhook():
     body = request.json
 
+    # ===== ここを追加 =====
+    print("===== WEBHOOK BODY =====")
+    print(json.dumps(body, ensure_ascii=False))
+    print("========================")
+    # =====================
+
     for event in body.get("events", []):
         if event.get("type") != "message":
             continue
