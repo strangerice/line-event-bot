@@ -152,19 +152,19 @@ def check_reminders():
 
             event_date = datetime.strptime(date, "%Y/%m/%d").date()
 
+            days = (event_date - today).days
+
+            if days == 14:
+                push(user, f"【2週間前】{event} {date} {time}")
+
+            elif days == 7:
+                push(user, f"【1週間前】{event} {date} {time}")
+
+            elif days == 0:
+                push(user, f"【今日】{event} {date} {time}")
+
         except:
             continue
-
-        days = (event_date - today).days
-
-        if days == 14:
-            push(user, f"【2週間前】{event} {date} {time}")
-
-        elif days == 7:
-            push(user, f"【1週間前】{event} {date} {time}")
-
-        elif days == 0:
-            push(user, f"【今日】{event} {date} {time}")
 
 # ==============================
 # cron用エンドポイント
@@ -173,9 +173,12 @@ def check_reminders():
 @app.route("/cron")
 def cron():
 
-    check_reminders()
+    try:
+        check_reminders()
+        return "ok"
 
-    return "ok"
+    except Exception as e:
+        return f"error: {str(e)}"
 
 
 if __name__ == "__main__":
