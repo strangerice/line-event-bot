@@ -133,13 +133,16 @@ def push(user, text):
 # ==============================
 def check_reminders():
 
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     data = sheet.get_all_values()
 
     today = datetime.now().date()
 
     for row in data:
+
+        if len(row) < 4:
+            continue
 
         event = row[0]
         date = row[1]
