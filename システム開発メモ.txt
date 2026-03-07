@@ -289,3 +289,9 @@ LINEカレンダー連携
 
 「LINEイベントBotの最強構成（企業レベル）」も解説できます。
 これを作るとかなり便利なBotになります。
+
+
+
+git add .
+git commit -m "event register bot"
+git push
