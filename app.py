@@ -440,34 +440,34 @@ def webhook():
         reply_token = event.get("replyToken")
         text = event["message"]["text"].strip()
 
-        target_id, target_type = get_target_info(event.get("source", {}))
-        if not target_id:
+        target_id, target_type, conversation_key = get_target_info(event.get("source", {}))
+        if not target_id or not conversation_key:
             continue
 
         if text == "一覧":
-            result = list_events(target_id)
+            result = list_events(conversation_key)
 
         elif text.startswith("削除"):
-            result = delete_event(text, target_id)
+            result = delete_event(text, conversation_key)
 
         elif text == "今日":
             d = today_jst()
-            result = filter_events_by_range(target_id, d, d, "今日")
+            result = filter_events_by_range(conversation_key, d, d, "今日")
 
         elif text == "明日":
             d = today_jst() + timedelta(days=1)
-            result = filter_events_by_range(target_id, d, d, "明日")
+            result = filter_events_by_range(conversation_key, d, d, "明日")
 
         elif text == "今週":
             start = today_jst()
             end = start + timedelta(days=6)
-            result = filter_events_by_range(target_id, start, end, "今週")
+            result = filter_events_by_range(conversation_key, start, end, "今週")
 
         else:
             if target_type in ["group", "room"]:
                 if text.startswith("登録 "):
                     event_text = text.replace("登録 ", "", 1).strip()
-                    result = register_event(event_text, target_id, target_type)
+                    result = register_event(event_text, conversation_key, target_id, target_type)
                 else:
                     result = (
                         "グループでは次の形式で登録してください\n"
@@ -477,7 +477,7 @@ def webhook():
                         "一覧\n削除 1\n今日\n明日\n今週"
                     )
             else:
-                result = register_event(text, target_id, target_type)
+                result = register_event(text, conversation_key, target_id, target_type)
 
         reply(reply_token, result)
 
