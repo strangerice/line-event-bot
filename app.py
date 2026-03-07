@@ -200,6 +200,7 @@ def register_event(text, conversation_key, target_id, target_type):
                 and row[2] == parsed["time"]
                 and row[3] == conversation_key
             ):
+                print("REGISTER DUPLICATE conversation_key =", conversation_key)
                 return f"すでに登録済みです\n{parsed['title']} {parsed['date']} {parsed['time']}"
 
         row = [
@@ -215,6 +216,7 @@ def register_event(text, conversation_key, target_id, target_type):
             ""
         ]
 
+        print("REGISTER conversation_key =", conversation_key)
         print("REGISTER ROW =", row)
         sheet.append_row(row)
         print("REGISTER DONE")
@@ -228,14 +230,29 @@ def register_event(text, conversation_key, target_id, target_type):
 # ==============================
 # 一覧
 # ==============================
-def list_events(target_id):
+def list_events(conversation_key):
     rows = get_data_rows()
-    my_rows = [row for row in rows if row[3] == target_id]
+
+    print("LIST conversation_key =", conversation_key)
+    print("LIST all rows =", rows)
+
+    my_rows = []
+    for row in rows:
+        row = normalize_row(row)
+        if row[3] == conversation_key:
+            my_rows.append(row)
+
+    print("LIST matched rows =", my_rows)
 
     if not my_rows:
         return "イベントはありません"
 
-    my_rows.sort(key=lambda r: datetime.strptime(f"{r[1]} {r[2].split('-')[0]}", "%Y/%m/%d %H:%M"))
+    my_rows.sort(
+        key=lambda r: datetime.strptime(
+            f"{r[1]} {r[2].split('-')[0]}",
+            "%Y/%m/%d %H:%M"
+        )
+    )
 
     lines = ["イベント一覧"]
     for idx, row in enumerate(my_rows, start=1):
