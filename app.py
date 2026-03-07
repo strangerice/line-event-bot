@@ -103,26 +103,32 @@ def parse_event_text(text):
     対応例:
     3/20 18:00 歓送迎会
     3/20 18:00-20:00 歓送迎会
+    2026/3/20 18:00 歓送迎会
+    2026/3/20 18:00-20:00 歓送迎会
     """
-    pattern = r"^\s*(\d{1,2})/(\d{1,2})\s+(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\s+(.+?)\s*$"
+
+    # 年あり / 年なし両対応
+    pattern = r"^\s*(?:(\d{4})/)?(\d{1,2})/(\d{1,2})\s+(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\s+(.+?)\s*$"
     match = re.match(pattern, text)
 
     if not match:
         return None
 
-    month = int(match.group(1))
-    day = int(match.group(2))
-    time_str = match.group(3)
-    title = match.group(4)
+    year_str = match.group(1)
+    month = int(match.group(2))
+    day = int(match.group(3))
+    time_str = match.group(4)
+    title = match.group(5)
 
-    # 開始時刻だけ年判定に使う
     start_time = time_str.split("-")[0]
 
-    year = now_jst().year
-    event_dt = datetime.strptime(f"{year}/{month}/{day} {start_time}", "%Y/%m/%d %H:%M")
-
-    if event_dt < now_jst() - timedelta(days=1):
-        year += 1
+    if year_str:
+        year = int(year_str)
+    else:
+        year = now_jst().year
+        event_dt = datetime.strptime(f"{year}/{month}/{day} {start_time}", "%Y/%m/%d %H:%M")
+        if event_dt < now_jst() - timedelta(days=1):
+            year += 1
 
     date_str = f"{year}/{month}/{day}"
 
