@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 LINE_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS")
-SHEET_NAME = "LINEイベントDB"
+SHEET_NAME = "LINEイベントDB_V2"
 
 # ==============================
 # Google Sheets 認証
@@ -34,15 +34,16 @@ def get_sheet():
 # シートヘッダー
 # ==============================
 HEADER = [
-    "title",        # A
-    "date",         # B 例: 2026/3/20
-    "time",         # C 例: 18:00 or 13:00-17:00
-    "target_id",    # D userId / groupId / roomId
-    "target_type",  # E user / group / room
-    "sent_14",      # F 0/1
-    "sent_7",       # G 0/1
-    "sent_0",       # H 0/1
-    "sent_weekly"   # I 週次送信済みキー 例: 2026-W11
+    "title",
+    "date",
+    "time",
+    "conversation_key",
+    "target_id",
+    "target_type",
+    "sent_14",
+    "sent_7",
+    "sent_0",
+    "sent_weekly"
 ]
 
 # ==============================
@@ -51,23 +52,14 @@ HEADER = [
 def ensure_header():
     sheet = get_sheet()
     values = sheet.get_all_values()
+
     if not values:
         sheet.append_row(HEADER)
         return
 
-    current_header = values[0]
-
-    # 既存列が足りない場合は不足列を追加
-    if current_header != HEADER:
-        needed = len(HEADER)
-        current = len(current_header)
-
-        if current < needed:
-            for idx in range(current + 1, needed + 1):
-                sheet.update_cell(1, idx, HEADER[idx - 1])
-        else:
-            for idx in range(1, needed + 1):
-                sheet.update_cell(1, idx, HEADER[idx - 1])
+    # 1行目が違ったら強制的に上書き
+    for idx, name in enumerate(HEADER, start=1):
+        sheet.update_cell(1, idx, name)
 
 ensure_header()
 
