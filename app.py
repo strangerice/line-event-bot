@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 LINE_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS")
-SHEET_NAME = "LINEイベントDB_V2"
+SHEET_NAME = "LINEイベントDB_V3"
 CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
 # ==============================
@@ -45,16 +45,17 @@ def get_calendar_service():
 # ==============================
 HEADER = [
     "title",             # 0
-    "date",              # 1 例: 2026/3/22
-    "time",              # 2 例: 09:00 or 09:00-12:00 or ""
-    "conversation_key",  # 3 例: group:Cxxx
-    "target_id",         # 4 LINE push先
-    "target_type",       # 5 user/group/room
-    "sent_14",           # 6
-    "sent_7",            # 7
-    "sent_0",            # 8
-    "sent_weekly",       # 9
-    "calendar_link"      # 10
+    "date",              # 1
+    "time",              # 2
+    "location",          # 3
+    "conversation_key",  # 4
+    "target_id",         # 5
+    "target_type",       # 6
+    "sent_14",           # 7
+    "sent_7",            # 8
+    "sent_0",            # 9
+    "sent_weekly",       # 10
+    "calendar_link"      # 11
 ]
 
 def normalize_row(row):
@@ -125,21 +126,33 @@ def parse_event_text(text):
     順不同で以下を抽出
     - 日付: 2026/3/9, 3/9, 今日, 明日, 次の土曜
     - 時刻: 15:00, 15:00~20:00, 15:00-20:00, 19時
+    - 場所: @渋谷, 場所:渋谷, 場所：渋谷
     - 残りをタイトル
     """
 
     text = normalize_text(text)
     now = now_jst()
 
-    original_text = text
-
     date_str = None
     time_str = ""
+    location = ""
+
+    # -----------------------------
+    # 0. 場所の明示指定抽出
+    # -----------------------------
+    m = re.search(r'@([^\s]+)', text)
+    if m:
+        location = m.group(1).strip()
+        text = text.replace(m.group(0), " ").strip()
+    else:
+        m = re.search(r'場所[:：]\s*([^\s]+)', text)
+        if m:
+            location = m.group(1).strip()
+            text = text.replace(m.group(0), " ").strip()
 
     # -----------------------------
     # 1. 日付抽出
     # -----------------------------
-    # YYYY/M/D
     m = re.search(r'(\d{4})/(\d{1,2})/(\d{1,2})', text)
     if m:
         year = int(m.group(1))
@@ -148,7 +161,6 @@ def parse_event_text(text):
         date_str = f"{year}/{month}/{day}"
         text = text.replace(m.group(0), " ").strip()
     else:
-        # M/D
         m = re.search(r'(?<!\d)(\d{1,2})/(\d{1,2})(?!\d)', text)
         if m:
             month = int(m.group(1))
@@ -160,7 +172,6 @@ def parse_event_text(text):
             date_str = f"{year}/{month}/{day}"
             text = text.replace(m.group(0), " ").strip()
         else:
-            # 今日 / 明日
             if "今日" in text:
                 d = now.date()
                 date_str = f"{d.year}/{d.month}/{d.day}"
@@ -170,7 +181,6 @@ def parse_event_text(text):
                 date_str = f"{d.year}/{d.month}/{d.day}"
                 text = text.replace("明日", " ").strip()
             else:
-                # 次の土曜
                 weekdays = {
                     "月": 0, "火": 1, "水": 2, "木": 3,
                     "金": 4, "土": 5, "日": 6
@@ -184,6 +194,60 @@ def parse_event_text(text):
                     d = now.date() + timedelta(days=days_ahead)
                     date_str = f"{d.year}/{d.month}/{d.day}"
                     text = text.replace(m.group(0), " ").strip()
+
+    # -----------------------------
+    # 2. 時刻抽出
+    # -----------------------------
+    m = re.search(r'(\d{1,2}:\d{2})\s*[~〜\-]\s*(\d{1,2}:\d{2})', text)
+    if m:
+        time_str = f"{m.group(1)}-{m.group(2)}"
+        text = text.replace(m.group(0), " ").strip()
+    else:
+        m = re.search(r'(\d{1,2})時(?:([0-5]?\d)分?)?', text)
+        if m:
+            hh = int(m.group(1))
+            mm = m.group(2)
+            mm = mm if mm else "00"
+            time_str = f"{hh:02d}:{int(mm):02d}"
+            text = text.replace(m.group(0), " ").strip()
+        else:
+            m = re.search(r'(\d{1,2}:\d{2})', text)
+            if m:
+                time_str = m.group(1)
+                text = text.replace(m.group(0), " ").strip()
+
+    # -----------------------------
+    # 3. 場所の推定抽出（明示指定がない場合）
+    #    末尾の1語を場所候補にする
+    # -----------------------------
+    text = normalize_text(text)
+
+    if not location:
+        parts = text.split(" ")
+        if len(parts) >= 2:
+            # 最後の語を場所候補、前をタイトル候補
+            maybe_location = parts[-1]
+            maybe_title = " ".join(parts[:-1]).strip()
+
+            # タイトルが空にならない時だけ採用
+            if maybe_title:
+                location = maybe_location
+                text = maybe_title
+
+    # -----------------------------
+    # 4. タイトル抽出
+    # -----------------------------
+    title = normalize_text(text)
+
+    if not date_str or not title:
+        return None
+
+    return {
+        "title": title,
+        "date": date_str,
+        "time": time_str,
+        "location": location
+    }
 
     # -----------------------------
     # 2. 時刻抽出
@@ -269,6 +333,7 @@ def create_google_calendar_event(parsed):
 
         date_str = parsed["date"]
         time_str = parsed["time"]
+        location = parsed.get("location", "")
 
         y, m, d = map(int, date_str.split("/"))
 
@@ -305,6 +370,9 @@ def create_google_calendar_event(parsed):
                 "end": {"date": next_day}
             }
 
+        if location:
+            event_body["location"] = location
+
         created = service.events().insert(calendarId=CALENDAR_ID, body=event_body).execute()
         return created.get("htmlLink", "")
 
@@ -326,7 +394,8 @@ def register_event_from_parsed(parsed, conversation_key, target_id, target_type)
                 row[0] == parsed["title"]
                 and row[1] == parsed["date"]
                 and row[2] == parsed["time"]
-                and row[3] == conversation_key
+                and row[3] == parsed["location"]
+                and row[4] == conversation_key
             ):
                 display_datetime = f"{parsed['date']} {parsed['time']}".strip()
                 return f"すでに登録済みです\n{parsed['title']}\n{display_datetime}"
@@ -337,6 +406,7 @@ def register_event_from_parsed(parsed, conversation_key, target_id, target_type)
             parsed["title"],
             parsed["date"],
             parsed["time"],
+            parsed["location"],
             conversation_key,
             target_id,
             target_type,
@@ -347,22 +417,21 @@ def register_event_from_parsed(parsed, conversation_key, target_id, target_type)
             calendar_link
         ]
 
-        print("REGISTER conversation_key =", conversation_key)
-        print("REGISTER ROW =", row)
         sheet.append_row(row)
-        print("REGISTER DONE")
 
         display_datetime = f"{parsed['date']} {parsed['time']}".strip()
+        location_line = f"\n場所: {parsed['location']}" if parsed["location"] else ""
 
         if calendar_link:
             return (
                 f"イベント登録しました\n"
                 f"{parsed['title']}\n"
-                f"{display_datetime}\n"
+                f"{display_datetime}"
+                f"{location_line}\n"
                 f"Googleカレンダーにも登録しました"
             )
 
-        return f"イベント登録しました\n{parsed['title']}\n{display_datetime}"
+        return f"イベント登録しました\n{parsed['title']}\n{display_datetime}{location_line}"
 
     except Exception as e:
         print("REGISTER ERROR =", str(e))
@@ -392,7 +461,7 @@ def list_events(conversation_key):
     my_rows = []
     for row in rows:
         row = normalize_row(row)
-        if row[3] == conversation_key:
+        if row[4] == conversation_key:
             my_rows.append(row)
 
     if not my_rows:
@@ -407,10 +476,12 @@ def list_events(conversation_key):
 
     lines = ["イベント一覧"]
     for idx, row in enumerate(my_rows, start=1):
+        location_text = f" / {row[3]}" if row[3] else ""
         if row[2]:
-            lines.append(f"{idx}. {row[0]} {row[1]} {row[2]}")
+            lines.append(f"{idx}. {row[0]} {row[1]} {row[2]}{location_text}")
         else:
-            lines.append(f"{idx}. {row[0]} {row[1]}")
+            lines.append(f"{idx}. {row[0]} {row[1]}{location_text}")
+
     return "\n".join(lines)
 
 # ==============================
@@ -454,7 +525,7 @@ def filter_events_by_range(conversation_key, start_date, end_date, title):
 
     for row in rows:
         row = normalize_row(row)
-        if row[3] != conversation_key:
+        if row[4] != conversation_key:
             continue
 
         try:
@@ -477,10 +548,11 @@ def filter_events_by_range(conversation_key, start_date, end_date, title):
 
     lines = [f"{title}の予定"]
     for row in result:
+        location_text = f" / {row[3]}" if row[3] else ""
         if row[2]:
-            lines.append(f"- {row[0]} {row[1]} {row[2]}")
+            lines.append(f"- {row[0]} {row[1]} {row[2]}{location_text}")
         else:
-            lines.append(f"- {row[0]} {row[1]}")
+            lines.append(f"- {row[0]} {row[1]}{location_text}")
     return "\n".join(lines)
 
 def build_weekly_summary_for_target(conversation_key):
@@ -492,7 +564,7 @@ def build_weekly_summary_for_target(conversation_key):
 
     for row in rows:
         row = normalize_row(row)
-        if row[3] != conversation_key:
+        if row[4] != conversation_key:
             continue
 
         try:
@@ -515,10 +587,12 @@ def build_weekly_summary_for_target(conversation_key):
 
     lines = ["【今週の予定】"]
     for row in result:
+        location_text = f" / {row[3]}" if row[3] else ""
         if row[2]:
-            lines.append(f"- {row[0]} {row[1]} {row[2]}")
+            lines.append(f"- {row[0]} {row[1]} {row[2]}{location_text}")
         else:
-            lines.append(f"- {row[0]} {row[1]}")
+            lines.append(f"- {row[0]} {row[1]}{location_text}")
+
     return "\n".join(lines)
 
 # ==============================
@@ -540,7 +614,7 @@ def check_daily_reminders():
     for sheet_row_no, row in enumerate(all_values[1:], start=2):
         row = normalize_row(row)
 
-        title, date_str, time_str, conversation_key, target_id, target_type, sent_14, sent_7, sent_0, sent_weekly, calendar_link = row
+        title, date_str, time_str, location, conversation_key, target_id, target_type, sent_14, sent_7, sent_0, sent_weekly, calendar_link = row
 
         try:
             event_date = datetime.strptime(date_str, "%Y/%m/%d").date()
@@ -549,18 +623,19 @@ def check_daily_reminders():
 
         days = (event_date - today).days
         display_datetime = f"{date_str} {time_str}" if time_str else date_str
+        location_line = f"\n場所: {location}" if location else ""
 
         if days == 14 and sent_14 != "1":
-            push(target_id, f"【2週間前リマインド】\n予定: {title}\n日時: {display_datetime}")
-            update_sent_flag(sheet_row_no, 7)
-
-        elif days == 7 and sent_7 != "1":
-            push(target_id, f"【1週間前リマインド】\n予定: {title}\n日時: {display_datetime}")
+            push(target_id, f"【2週間前リマインド】\n予定: {title}\n日時: {display_datetime}{location_line}")
             update_sent_flag(sheet_row_no, 8)
 
-        elif days == 0 and sent_0 != "1":
-            push(target_id, f"【本日9時リマインド】\n予定: {title}\n日時: {display_datetime}")
+        elif days == 7 and sent_7 != "1":
+            push(target_id, f"【1週間前リマインド】\n予定: {title}\n日時: {display_datetime}{location_line}")
             update_sent_flag(sheet_row_no, 9)
+
+        elif days == 0 and sent_0 != "1":
+            push(target_id, f"【本日9時リマインド】\n予定: {title}\n日時: {display_datetime}{location_line}")
+            update_sent_flag(sheet_row_no, 10)
 
 def check_weekly_schedule():
     today = today_jst()
@@ -575,8 +650,8 @@ def check_weekly_schedule():
     for idx, row in enumerate(rows, start=2):
         row = normalize_row(row)
 
-        conversation_key = row[3]
-        target_id = row[4]
+        conversation_key = row[4]
+        target_id = row[5]
 
         if not conversation_key or not target_id:
             continue
@@ -585,10 +660,10 @@ def check_weekly_schedule():
 
     for conversation_key, row_items in conversations.items():
         already_sent = False
-        target_id = row_items[0][1][4]
+        target_id = row_items[0][1][5]
 
         for _, row in row_items:
-            if row[9] == week_key:
+            if row[10] == week_key:
                 already_sent = True
                 break
 
@@ -599,7 +674,7 @@ def check_weekly_schedule():
         push(target_id, message)
 
         for sheet_row_no, _ in row_items:
-            update_sent_flag(sheet_row_no, 10, week_key)
+            update_sent_flag(sheet_row_no, 11, week_key)
 
 def check_reminders():
     check_daily_reminders()
