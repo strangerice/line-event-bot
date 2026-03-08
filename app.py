@@ -122,92 +122,106 @@ def get_target_info(event_source):
 # ==============================
 def parse_event_text(text):
     """
-    対応例:
-    3/20 歓送迎会
-    3/20 18:00 歓送迎会
-    3/20 18:00-20:00 歓送迎会
-    2026/3/20 歓送迎会
-    2026/3/20 18:00 歓送迎会
-    明日19時 飲み会
-    明日 19時 飲み会
-    今日 越谷_C
-    次の土曜 13:00-17:00 越谷_C
+    順不同で以下を抽出
+    - 日付: 2026/3/9, 3/9, 今日, 明日, 次の土曜
+    - 時刻: 15:00, 15:00~20:00, 15:00-20:00, 19時
+    - 残りをタイトル
     """
+
     text = normalize_text(text)
     now = now_jst()
 
-    # 1) YYYY/M/D or M/D + optional time/range + title
-    pattern1 = r"^(?:(\d{4})/)?(\d{1,2})/(\d{1,2})(?:\s+(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?))?\s+(.+)$"
-    m = re.match(pattern1, text)
+    original_text = text
+
+    date_str = None
+    time_str = ""
+
+    # -----------------------------
+    # 1. 日付抽出
+    # -----------------------------
+    # YYYY/M/D
+    m = re.search(r'(\d{4})/(\d{1,2})/(\d{1,2})', text)
     if m:
-        year_str = m.group(1)
+        year = int(m.group(1))
         month = int(m.group(2))
         day = int(m.group(3))
-        time_str = m.group(4) or ""
-        title = m.group(5).strip()
-
-        if year_str:
-            year = int(year_str)
-        else:
+        date_str = f"{year}/{month}/{day}"
+        text = text.replace(m.group(0), " ").strip()
+    else:
+        # M/D
+        m = re.search(r'(?<!\d)(\d{1,2})/(\d{1,2})(?!\d)', text)
+        if m:
+            month = int(m.group(1))
+            day = int(m.group(2))
             year = now.year
             base_dt = datetime.strptime(f"{year}/{month}/{day}", "%Y/%m/%d")
             if base_dt.date() < now.date() - timedelta(days=1):
                 year += 1
+            date_str = f"{year}/{month}/{day}"
+            text = text.replace(m.group(0), " ").strip()
+        else:
+            # 今日 / 明日
+            if "今日" in text:
+                d = now.date()
+                date_str = f"{d.year}/{d.month}/{d.day}"
+                text = text.replace("今日", " ").strip()
+            elif "明日" in text:
+                d = now.date() + timedelta(days=1)
+                date_str = f"{d.year}/{d.month}/{d.day}"
+                text = text.replace("明日", " ").strip()
+            else:
+                # 次の土曜
+                weekdays = {
+                    "月": 0, "火": 1, "水": 2, "木": 3,
+                    "金": 4, "土": 5, "日": 6
+                }
+                m = re.search(r'次の([月火水木金土日])曜(?:日)?', text)
+                if m:
+                    target_weekday = weekdays[m.group(1)]
+                    days_ahead = (target_weekday - now.weekday() + 7) % 7
+                    if days_ahead == 0:
+                        days_ahead = 7
+                    d = now.date() + timedelta(days=days_ahead)
+                    date_str = f"{d.year}/{d.month}/{d.day}"
+                    text = text.replace(m.group(0), " ").strip()
 
-        return {
-            "title": title,
-            "date": f"{year}/{month}/{day}",
-            "time": time_str
-        }
-
-    # 2) 今日 / 明日
-    pattern2 = r"^(今日|明日)(?:\s*(\d{1,2})(?::|時)?(\d{2})?)?(?:-(\d{1,2}:\d{2}))?\s+(.+)$"
-    m = re.match(pattern2, text)
+    # -----------------------------
+    # 2. 時刻抽出
+    # -----------------------------
+    # 15:00~20:00 / 15:00-20:00
+    m = re.search(r'(\d{1,2}:\d{2})\s*[~〜\-]\s*(\d{1,2}:\d{2})', text)
     if m:
-        word = m.group(1)
-        hour = m.group(2)
-        minute = m.group(3)
-        range_end = m.group(4)
-        title = m.group(5).strip()
+        time_str = f"{m.group(1)}-{m.group(2)}"
+        text = text.replace(m.group(0), " ").strip()
+    else:
+        # 19時 / 19時30
+        m = re.search(r'(\d{1,2})時(?:([0-5]?\d)分?)?', text)
+        if m:
+            hh = int(m.group(1))
+            mm = m.group(2)
+            mm = mm if mm else "00"
+            time_str = f"{hh:02d}:{int(mm):02d}"
+            text = text.replace(m.group(0), " ").strip()
+        else:
+            # 15:00
+            m = re.search(r'(\d{1,2}:\d{2})', text)
+            if m:
+                time_str = m.group(1)
+                text = text.replace(m.group(0), " ").strip()
 
-        base_date = now.date() if word == "今日" else (now.date() + timedelta(days=1))
+    # -----------------------------
+    # 3. タイトル抽出
+    # -----------------------------
+    title = normalize_text(text)
 
-        time_str = ""
-        if hour:
-            mm = minute if minute else "00"
-            start = f"{int(hour):02d}:{mm}"
-            time_str = f"{start}-{range_end}" if range_end else start
+    if not date_str or not title:
+        return None
 
-        return {
-            "title": title,
-            "date": f"{base_date.year}/{base_date.month}/{base_date.day}",
-            "time": time_str
-        }
-
-    # 3) 次の土曜 13:00-17:00 越谷_C
-    weekdays = {
-        "月": 0, "火": 1, "水": 2, "木": 3,
-        "金": 4, "土": 5, "日": 6
+    return {
+        "title": title,
+        "date": date_str,
+        "time": time_str
     }
-    pattern3 = r"^次の([月火水木金土日])曜(?:日)?(?:\s+(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?))?\s+(.+)$"
-    m = re.match(pattern3, text)
-    if m:
-        target_weekday = weekdays[m.group(1)]
-        time_str = m.group(2) or ""
-        title = m.group(3).strip()
-
-        days_ahead = (target_weekday - now.weekday() + 7) % 7
-        if days_ahead == 0:
-            days_ahead = 7
-        target_date = now.date() + timedelta(days=days_ahead)
-
-        return {
-            "title": title,
-            "date": f"{target_date.year}/{target_date.month}/{target_date.day}",
-            "time": time_str
-        }
-
-    return None
 
 # ==============================
 # データ取得
